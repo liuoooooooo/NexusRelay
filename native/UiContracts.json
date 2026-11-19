@@ -3,29 +3,32 @@
   "layers": "[...document.querySelectorAll('[role=menu], [role=listbox], [role=dialog]')].filter(e => [...e.getClientRects()].some(r => r.width > 0 && r.height > 0) && !e.hasAttribute('data-ending-style') && !e.hasAttribute('data-closed')).length",
   "draft": "(() => [...document.querySelectorAll('[contenteditable=true], textarea')].filter(e => e.getClientRects().length).some(e => ((e.value ?? e.innerText) || '').trim().length > 0))()",
   "agy_running": "!![...document.querySelectorAll('button')].find(b => b.getClientRects().length && /^(Stop execution|Stop generating|Stop)$/i.test((b.getAttribute('aria-label') || '').trim()))",
-  "danger": "envoy|send|archiv|supprim|delete|remove|retir|déconnect|deconnect|log ?out|sign ?out|quitter|quit|exit|acheter|buy|upgrade|abonn|install|réinitial|reset|feedback|commentaire|signaler|report|stop|arrêt|changer de compte|switch account|ajouter un compte|add account|nouvel|nouveau|nouvelle|new |fermer|close|dupliquer|duplicate|clear|effac|vider|purg|trash|corbeille|run\\b|lancer|exécut|execut|start|play|revoke|révoqu|disconnect|import|export|download|télécharg",
+  "danger": "envoy|send|archiv|supprim|delete|remove|retir|déconnect|deconnect|log ?out|sign ?out|quitter|quit|exit|acheter|buy|upgrade|abonn|install|réinitial|reset|feedback|commentaire|signaler|report|stop|arrêt|changer de compte|switch account|ajouter un compte|add account|nouvel|nouveau|nouvelle|new |fermer|close|dupliquer|duplicate|clear|effac|vider|purg|trash|corbeille|run\\b|lancer|exécut|execut|start|play|revoke|révoqu|disconnect|import|export|download|télécharg|发送|归档|删除|移除|退出|购买|升级|订阅|安装|重置|反馈|举报|停止|切换帐户|切换账户|添加帐户|添加账户|新建|新聊天|开始新聊天|关闭|复制|清除|清空|回收站|运行|执行|启动|播放|撤销|断开|导入|导出|下载",
   "landmarks": {
     "codex": {
       "NEW_CHAT": {
         "role": "button",
         "labels": [
           "Nouveau chat",
-          "New chat"
+          "New chat",
+          "新聊天"
         ]
       },
       "MODE": {
         "popup": "menu",
-        "aria_re": "^(Changer de mode|Switch mode)"
+        "aria_re": "^(Changer de mode|Switch mode|切换模式，当前模式：)"
       },
       "CHAT_ACTIONS": {
         "popup": "menu",
         "labels": [
           "Actions du chat",
-          "Chat actions"
+          "Chat actions",
+          "聊天操作"
         ],
         "unless": [
           "Aucun chat",
-          "No chats"
+          "No chats",
+          "暂无聊天"
         ],
         "needs": "chat_open"
       },
@@ -34,11 +37,14 @@
           "Archiver le chat",
           "Archive chat",
           "Archiver",
-          "Archive"
+          "Archive",
+          "归档聊天",
+          "归档"
         ],
         "unless": [
           "Aucun chat",
-          "No chats"
+          "No chats",
+          "暂无聊天"
         ],
         "needs": "chat_open"
       },
@@ -91,7 +97,8 @@
       "subpages": "[role=tablist]:not([aria-label*='chat' i]) [role=tab], [data-settings-panel-slug]:not([data-settings-panel-slug=account])",
       "menu_pages": [
         "Paramètres",
-        "Settings"
+        "Settings",
+        "设置"
       ],
       "reveal": "[data-app-action-sidebar-thread-row]",
       "triggers": {},

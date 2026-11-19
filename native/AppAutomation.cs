@@ -23,8 +23,18 @@ public static partial class AppAutomation
         let f=key?r[key]:null,id=null;for(let i=0;i<12&&f&&!id;i++){const p=f.memoizedProps||{};if(typeof p.conversationId==='string')id=p.conversationId;f=f.return;}
         if(id)out.push({row:r.getAttribute('data-app-action-sidebar-thread-id'),id,active:r.getAttribute('data-app-action-sidebar-thread-active')==='true',selected:r.getAttribute('data-app-action-sidebar-thread-selected')==='true'});}return out})()
         """;
-    private const string CurrentProject = "[...document.querySelectorAll('button,[role=button]')].filter(e=>e.getClientRects().length).map(e=>e.getAttribute('aria-label')||'').find(s=>s.startsWith('Changer de projet : ')||s.startsWith('Change project: '))||''";
-    private const string ModeButton = "[...document.querySelectorAll('button[aria-haspopup=menu]')].find(e=>e.getClientRects().length&&/mode/i.test(e.getAttribute('aria-label')||'')&&['ChatGPT','Codex'].includes((e.innerText||'').trim()))";
+    private static readonly string[] ProjectPrefixes = ["Changer de projet : ", "Change project: ", "切换项目："];
+    private static readonly string ProjectPrefixJson = System.Text.Json.JsonSerializer.Serialize(ProjectPrefixes, RelayJsonContext.Default.StringArray);
+    private static readonly string CurrentProject = $"[...document.querySelectorAll('button,[role=button]')].filter(e=>e.getClientRects().length).map(e=>e.getAttribute('aria-label')||'').find(s=>{ProjectPrefixJson}.some(prefix=>s.startsWith(prefix)))||''";
+    public static string? ProjectName(string? label)
+    {
+        foreach (string prefix in ProjectPrefixes)
+            if (label?.StartsWith(prefix, StringComparison.Ordinal) == true && label.Length > prefix.Length)
+                return label[prefix.Length..];
+        return null;
+    }
+    public static string[] NewChatLabels(string name) => [$"Démarrer un nouveau chat dans {name}", $"Start new chat in {name}", $"在 {name} 中开始新聊天"];
+    private const string ModeButton = "[...document.querySelectorAll('button[aria-haspopup=menu]')].find(e=>e.getClientRects().length&&/mode|^切换模式，当前模式：/i.test(e.getAttribute('aria-label')||'')&&['ChatGPT','Codex'].includes((e.innerText||'').trim()))";
     private static string? Selected(CdpPage page) => (page.Eval(Rows) as JsonArray)?.OfType<JsonObject>().FirstOrDefault(r => AppTransport.Truth(r["active"]))?["id"]?.ToString();
     // Codex 26.10 shows a chat both under its project and in Chats: several rows are fine if they are the same chat.
     private static bool Open(CdpPage page, string id) => page.Press($"(()=>{{const rows={Rows};const own=rows.filter(r=>r.id==={AppTransport.Quote(id)});if(!own.length||new Set(own.map(r=>r.row)).size!==1)return null;return [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')].find(r=>r.getClientRects().length&&r.getAttribute('data-app-action-sidebar-thread-id')===own[0].row)}})()");
@@ -39,14 +49,13 @@ public static partial class AppAutomation
     private static bool RestoreProject(CdpPage page, string project)
     {
         if (page.Eval(CurrentProject)?.ToString() == project) return true;
-        if (project.Contains(": ", StringComparison.Ordinal))
+        if (ProjectName(project) is string name)
         {
-            string name = project[(project.IndexOf(": ", StringComparison.Ordinal) + 2)..].Trim();
-            page.Click($"Démarrer un nouveau chat dans {name}", $"Start new chat in {name}");
+            page.Click(NewChatLabels(name));
         }
         else
         {
-            page.Click("Nouveau chat", "New chat");
+            page.Click("Nouveau chat", "New chat", "新聊天");
             AppTransport.Wait(() => page.Press("[...document.querySelectorAll('[data-clear-project-button]')].find(e=>e.getClientRects().length&&!e.disabled)"), 2);
         }
         return AppTransport.Wait(() => page.Eval(CurrentProject)?.ToString() == project, 3);
@@ -93,6 +102,10 @@ public static partial class AppAutomation
             var ready = AppTransport.EnsureApp("codex");
             if (ready["status"]?.ToString() != "ready") return result = ready;
             page = new CdpPage(AppTransport.PageUrl("codex") ?? throw new RelayError("Codex main page missing"));
+            // The sidebar owns the project and thread rows, including those used to verify an existing topic.
+            sidebarReopened = page.Click("Afficher la barre latérale", "Show sidebar", "显示侧边栏");
+            if (sidebarReopened)
+                AppTransport.Wait(() => AppTransport.Truth(page.Eval("!!document.querySelector('[data-app-action-sidebar-project-id],[data-app-action-sidebar-thread-row]')")), 3);
             previous = Selected(page); view = page.Eval(View); beforeMode = Mode(page); project = page.Eval(CurrentProject)?.ToString() ?? "";
             if (!SetMode(page, "Codex")) return Outcome("failed", "Codex mode not selected");
             var space = CodexSpace.Configured();
@@ -110,7 +123,7 @@ public static partial class AppAutomation
             else
             {
                 string label = space["label"]!.ToString();
-                string labels = System.Text.Json.JsonSerializer.Serialize(CodexSpace.Labels(space).SelectMany(name => new[] { $"Démarrer un nouveau chat dans {name}", $"Start new chat in {name}" }).ToArray(), RelayJsonContext.Default.StringArray);
+                string labels = System.Text.Json.JsonSerializer.Serialize(CodexSpace.Labels(space).SelectMany(NewChatLabels).ToArray(), RelayJsonContext.Default.StringArray);
                 string relayButton = $"[...document.querySelectorAll('button,[role=button]')].find(e=>e.getClientRects().length&&{labels}.includes((e.getAttribute('aria-label')||'').trim()))";
                 if (explicitSpace)
                 {
@@ -122,23 +135,21 @@ public static partial class AppAutomation
                     if (!ProjectMatches(ProjectEvidence(page), space)) return Outcome("failed", "Configured project ID/path do not match the visible app project; nothing typed");
                     string container = "[...document.querySelectorAll('[data-sidebar-project-container-id]')].filter(e=>e.getClientRects().length&&!e.parentElement?.closest('[data-sidebar-project-container-id]')&&e.getAttribute('data-sidebar-project-container-id')===" + AppTransport.Quote("project:" + space["project_id"]) + ")";
                     relayButton = $"(()=>{{const roots={container};if(roots.length!==1)return null;const buttons=[...roots[0].querySelectorAll('button,[role=button]')].filter(e=>e.getClientRects().length&&{labels}.includes((e.getAttribute('aria-label')||'').trim()));return buttons.length===1?buttons[0]:null}})()";
-                    string oldProject = project.Contains(": ", StringComparison.Ordinal) ? project[(project.IndexOf(": ", StringComparison.Ordinal) + 2)..].Trim() : "";
                     // Only a draft with text is the user's to keep; the empty draft a freshly started Codex opens is replaced
                     // by the verified project button below (its identity is then proven before anything is typed).
-                    if (previous is null && oldProject == label && !string.IsNullOrWhiteSpace(page.Eval(ComposerText)?.ToString()))
+                    if (previous is null && ProjectName(project) == label && !string.IsNullOrWhiteSpace(page.Eval(ComposerText)?.ToString()))
                         return Outcome("deferred", "An existing draft has the same label; its project identity cannot be proven, so it is preserved");
                 }
                 if (!AppTransport.Wait(() => AppTransport.Truth(page.Eval($"!!({relayButton})")), 4))
                 {
                     page.Press("[...document.querySelectorAll('[data-sidebar-destination=\"builtin:home\"]')].find(e=>e.getClientRects().length)");
-                    sidebarReopened = page.Click("Afficher la barre latérale", "Show sidebar");
                 }
                 if (!AppTransport.Wait(() => AppTransport.Truth(page.Eval($"!!({relayButton})")), 2) || Present() || !(page.Press(relayButton) || page.Activate(relayButton)))
                     return Outcome("failed", $"Configured Codex project {CodexSpace.Configured()["label"]} missing: {AppSessions.RelayDirectory}");
-                if (explicitSpace && !AppTransport.Wait(() => Selected(page) is null && (page.Eval(CurrentProject)?.ToString() ?? "").EndsWith(": " + label, StringComparison.Ordinal)))
+                if (explicitSpace && !AppTransport.Wait(() => Selected(page) is null && ProjectName(page.Eval(CurrentProject)?.ToString()) == label))
                     return Outcome("failed", "New draft in the configured project was not confirmed; nothing typed");
             }
-            bool ContextValid() => !explicitSpace || ProjectMatches(ProjectEvidence(page), space) && (known is not null ? Selected(page) == known.Id : Selected(page) is null && (page.Eval(CurrentProject)?.ToString() ?? "").EndsWith(": " + space["label"], StringComparison.Ordinal));
+            bool ContextValid() => !explicitSpace || ProjectMatches(ProjectEvidence(page), space) && (known is not null ? Selected(page) == known.Id : Selected(page) is null && ProjectName(page.Eval(CurrentProject)?.ToString()) == space["label"]!.ToString());
             if (!AppTransport.Wait(() => page.Eval(ComposerText) is not null)) return Outcome("failed", "Codex input field missing");
             if (page.Eval(ComposerText)?.ToString() is string draft && !string.IsNullOrWhiteSpace(draft))
             { // 08/11: a wake whose Enter did not take left its text in the topic chat's draft, and every later wake of the topic waited behind it.
@@ -196,7 +207,7 @@ public static partial class AppAutomation
                         else if (view is JsonArray labels)
                             foreach (string label in labels.Select(n => n?.ToString() ?? "").Reverse()) if (page.Click(label)) break;
                         if (beforeMode is not null) result["mode_restored"] = SetMode(page, beforeMode);
-                        if (sidebarReopened) result["sidebar_restored"] = page.Click("Masquer la barre latérale", "Hide sidebar");
+                        if (sidebarReopened) result["sidebar_restored"] = page.Click("Masquer la barre latérale", "Hide sidebar", "隐藏侧边栏");
                     }
                     else result["restore_skipped"] = "Julien returned to Codex";
                 }
@@ -222,8 +233,8 @@ public static partial class AppAutomation
             if (app == "codex")
             {
                 result["mode"] = Mode(page);
-                var names = CodexSpace.Labels(CodexSpace.Configured());
-                result["relay_project_visible"] = items.OfType<JsonObject>().Any(e => names.Any(name => (e["label"]?.ToString() ?? "").Contains("nouveau chat dans " + name, StringComparison.OrdinalIgnoreCase) || (e["label"]?.ToString() ?? "").Contains("new chat in " + name, StringComparison.OrdinalIgnoreCase)));
+                var labels = CodexSpace.Labels(CodexSpace.Configured()).SelectMany(NewChatLabels).ToHashSet(StringComparer.Ordinal);
+                result["relay_project_visible"] = items.OfType<JsonObject>().Any(e => e["label"]?.ToString() is string label && labels.Contains(label));
                 result["composer_visible"] = page.Eval($"!!({Composer})");
                 result["execution_space"] = CodexSpace.Configured();
                 result["project_evidence"] = ProjectEvidence(page);
@@ -254,11 +265,11 @@ public static partial class AppAutomation
                 if (own.Count != 1) continue;
                 string row = $"[...document.querySelectorAll('[data-app-action-sidebar-thread-id]')].find(e=>e.getClientRects().length&&e.getAttribute('data-app-action-sidebar-thread-id')==={AppTransport.Quote(own[0]["row"]?.ToString())})";
                 if (!Eligible() || AppTransport.UserPresent("codex") || AppTransport.EmergencyStop()) continue;
-                bool clicked = page.Press($"(()=>{{const row={row};return row&&[...row.querySelectorAll('button,[role=button]')].find(e=>['Archiver le chat','Archive chat'].includes(e.getAttribute('aria-label')))}})()");
+                bool clicked = page.Press($"(()=>{{const row={row};return row&&[...row.querySelectorAll('button,[role=button]')].find(e=>['Archiver le chat','Archive chat','归档聊天'].includes(e.getAttribute('aria-label')))}})()");
                 if (!clicked && page.Press($"(()=>{{const row={row};return row&&row.querySelector('button[aria-haspopup=menu]')}})()"))
                 {
                     if (!Eligible() || AppTransport.UserPresent("codex") || AppTransport.EmergencyStop()) { page.Escape(); continue; }
-                    clicked = page.Click("Archiver", "Archive");
+                    clicked = page.Click("Archiver", "Archive", "归档");
                 }
                 if (clicked && AppTransport.Wait(() => AppSessions.CodexChats().Any(c => c.Id == chat.Id && c.Archived), 8)) archived++;
             }

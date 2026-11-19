@@ -18,6 +18,24 @@ public sealed class ContractTests : IDisposable
     public void Dispose() => iso.Dispose();
     private static JsonObject Golden(string name) => JsonNode.Parse(File.ReadAllText(Paths.Golden(name)))!.AsObject();
 
+    [Theory]
+    [InlineData("切换项目：设计：A: B", "设计：A: B")]
+    [InlineData("Change project: Other: NexusRelay", "Other: NexusRelay")]
+    [InlineData("Changer de projet : Nexus Relay", "Nexus Relay")]
+    [InlineData("切换项目: NexusRelay", null)]
+    [InlineData("切换项目：", null)]
+    [InlineData("随机：NexusRelay", null)]
+    public void Project_label_preserves_the_exact_name(string label, string? expected)
+        => Assert.Equal(expected, AppAutomation.ProjectName(label));
+
+    [Fact]
+    public void Chinese_project_button_is_scoped_to_the_entire_name()
+    {
+        var labels = AppAutomation.NewChatLabels("设计：A");
+        Assert.Contains("在 设计：A 中开始新聊天", labels);
+        Assert.DoesNotContain("在 设计：AB 中开始新聊天", labels);
+    }
+
     [Fact]
     public void Every_tool_schema_matches_the_recorded_oracle_and_is_valid_json_schema()
     {

@@ -1,0 +1,66 @@
+name: Codex zh-CN Windows build
+on:
+  push:
+    branches: [feat/codex-zh-cn]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Tests (test.ps1)
+        shell: pwsh
+        run: ./test.ps1
+      - name: Packages
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $stage = Join-Path $env:RUNNER_TEMP 'stage'
+          New-Item -ItemType Directory dist, $stage | Out-Null
+          $shared = 'install.ps1', 'get.ps1', 'LICENSE', 'README.md', 'CHANGELOG.md', 'codex-projet', 'claude-projet'
+          # Only the Antigravity part of plugin/ ships with the engine (install.ps1 deploys it); Claude Code and Codex take
+          # plugin/ from the NexusSystem catalog.
+          $deployed = 'plugin/antigravity', 'fr/plugin/antigravity', 'fr/codex-projet', 'fr/claude-projet'
+          $scripts = 'install_commit_guard.ps1', 'pre-commit', 'post-commit'
+          # One locked restore for both architectures (packages.lock.json, the AOT compiler included); then no restore.
+          dotnet restore native/NexusRelay.csproj
+          if ($LASTEXITCODE) { throw 'dotnet restore failed' }
+          # Native AOT finds the C++ linker through vswhere, which is not on PATH outside a developer prompt.
+          $env:PATH = "$env:PATH;${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+          $rid = 'win-x64'
+          $engine = Join-Path $stage "engine-$rid"
+          # PublishAot (native/NexusRelay.csproj): NexusRelay.exe compiled ahead of time, no assembly beside it.
+          dotnet publish native/NexusRelay.csproj -c Release -r $rid --no-restore -p:DebugType=none -o $engine --nologo
+          if ($LASTEXITCODE) { throw "dotnet publish $rid failed" }
+          if (-not (Test-Path "$engine/NexusRelay.exe") -or (Get-ChildItem $engine -Filter *.dll)) { throw "$rid was not compiled ahead of time." }
+          # Installer archive: the engine in bin\ (it installs itself), install.ps1 (the starter an older get.ps1 runs) and
+          # what the engine deploys (no sources).
+          $zip = Join-Path $stage "zip-$rid"
+          New-Item -ItemType Directory "$zip\scripts" | Out-Null
+          Copy-Item $shared $zip -Recurse
+          foreach ($folder in $deployed) { $into = Join-Path $zip (Split-Path $folder); New-Item -ItemType Directory -Force $into | Out-Null; Copy-Item $folder $into -Recurse }
+          $scripts | ForEach-Object { Copy-Item "scripts/$_" "$zip\scripts" }
+          Copy-Item $engine "$zip\bin" -Recurse
+          [IO.Compression.ZipFile]::CreateFromDirectory($zip, "$PWD\dist\NexusRelay-$rid.zip")
+          (Get-FileHash dist/NexusRelay-win-x64.zip -Algorithm SHA256).Hash | Set-Content dist/SHA256.txt
+      - name: The x64 engine of the archive starts and lists its tools
+        shell: pwsh
+        run: |
+          Expand-Archive dist/NexusRelay-win-x64.zip "$env:RUNNER_TEMP\check"
+          $tools = & "$env:RUNNER_TEMP\check\bin\NexusRelay.exe" --schemas | ConvertFrom-Json
+          if (@($tools).Count -ne 20) { throw "tools: $(@($tools).Count)" }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
