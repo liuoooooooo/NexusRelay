@@ -31,15 +31,12 @@ jobs:
           # plugin/ from the NexusSystem catalog.
           $deployed = 'plugin/antigravity', 'fr/plugin/antigravity', 'fr/codex-projet', 'fr/claude-projet'
           $scripts = 'install_commit_guard.ps1', 'pre-commit', 'post-commit'
-          # One locked restore for both architectures (packages.lock.json, the AOT compiler included); then no restore.
-          dotnet restore native/NexusRelay.csproj
-          if ($LASTEXITCODE) { throw 'dotnet restore failed' }
           # Native AOT finds the C++ linker through vswhere, which is not on PATH outside a developer prompt.
           $env:PATH = "$env:PATH;${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
           $rid = 'win-x64'
           $engine = Join-Path $stage "engine-$rid"
           # PublishAot (native/NexusRelay.csproj): NexusRelay.exe compiled ahead of time, no assembly beside it.
-          dotnet publish native/NexusRelay.csproj -c Release -r $rid --no-restore -p:DebugType=none -o $engine --nologo
+          dotnet publish native/NexusRelay.csproj -c Release -r $rid --self-contained true -p:RuntimeFrameworkVersion=10.0.14 -p:DebugType=none -o $engine --nologo
           if ($LASTEXITCODE) { throw "dotnet publish $rid failed" }
           if (-not (Test-Path "$engine/NexusRelay.exe") -or (Get-ChildItem $engine -Filter *.dll)) { throw "$rid was not compiled ahead of time." }
           # Installer archive: the engine in bin\ (it installs itself), install.ps1 (the starter an older get.ps1 runs) and
